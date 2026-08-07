@@ -165,8 +165,12 @@ deploys - the actual pipeline always runs against an already-active cluster sess
 |---|---|---|
 | `lint_and_test` | PRs, pushes to `develop`/`main`, manual | `flake8 src tests`, `pytest tests` |
 | `validate` | PRs, pushes to `develop`/`main`, manual | Installs the Databricks CLI (`databricks/setup-cli`), runs `databricks bundle validate` |
-| `deploy_dev` | PRs, pushes to `develop`, manual with `target=dev` | `databricks bundle deploy -t dev` against the `dev` environment - no approval required |
+| `deploy_dev` | pushes to `develop`, manual with `target=dev` | `databricks bundle deploy -t dev` against the `dev` environment - no approval required |
 | `deploy_prod` | pushes to `main`, manual with `target=prod` | `databricks bundle deploy -t prod` against the `prod` environment - **queued, then paused** until a required reviewer approves it in the Actions run |
+
+A PR only runs `lint_and_test` and `validate` - nothing deploys until it's merged (deploying on
+every PR update as well used to double-deploy the same code once on open/update and again on
+merge, so that trigger was dropped).
 
 **Manual runs**: Actions tab -> **CI/CD** -> **Run workflow** -> pick the branch and a `target` (`dev`/`prod`).
 `lint_and_test`/`validate` always run; whichever `deploy_*` job matches your chosen `target` runs
