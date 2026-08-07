@@ -14,6 +14,7 @@ expectations in orders_etl.py have real bad rows to drop.
 
 import json
 import logging
+import os
 import random
 import sys
 import uuid
@@ -22,7 +23,16 @@ from typing import Optional
 
 from faker import Faker
 
-LANDING_PATH = "/Volumes/main/orders_raw/landing/orders"
+# Defaults to the real Unity Catalog landing volume; override for local/manual
+# runs with e.g. `LANDING_PATH=./local_data/orders python generate_synthetic_orders.py`.
+# Deliberately not auto-detected: there's no environment signal (env var or
+# mount point) confirmed to reliably distinguish "real Databricks serverless
+# job" from "developer's laptop" - both a DATABRICKS_RUNTIME_VERSION check and
+# a `/Volumes` mount check were tried and rejected here, the latter because
+# `/Volumes` is a standard macOS mount point that exists on every Mac. An
+# explicit env var with a safe production default can't misfire either way.
+LANDING_PATH = os.environ.get("LANDING_PATH", "/Volumes/main/orders_raw/landing/orders")
+
 BATCH_SIZE = 50
 INVALID_RECORD_RATE = 0.05
 
@@ -79,7 +89,7 @@ def write_batch(orders: list[dict], landing_path: str) -> str:
     """
     Path(landing_path).mkdir(parents=True, exist_ok=True)
     file_path = Path(landing_path) / f"orders_{uuid.uuid4().hex}.json"
-    with file_path.open("w") as f:
+    with open(str(file_path), "w") as f:
         for order in orders:
             f.write(json.dumps(order) + "\n")
     return str(file_path)

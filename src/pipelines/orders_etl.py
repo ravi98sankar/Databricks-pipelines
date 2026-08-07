@@ -17,7 +17,11 @@ from pyspark.sql import functions as F
 RAW_ORDERS_PATH = "/Volumes/main/orders_raw/landing/orders"
 BRONZE_TABLE_COMMENT = "Raw orders ingested incrementally from cloud storage via Auto Loader."
 SILVER_TABLE_COMMENT = "Cleansed, deduplicated, and validated orders."
-GOLD_TABLE_COMMENT = "Daily customer-level spend and activity metrics."
+GOLD_TABLE_COMMENT = (
+    "Daily customer-level spend and activity metrics "
+    "(stores composable components for incremental refresh)."
+)
+GOLD_ANALYTICS_COMMENT = "Derived analytics with average order value and variability measures."
 
 TEXT_COLUMNS_TO_STANDARDIZE = ["customer_id", "status", "region"]
 
@@ -132,6 +136,44 @@ def gold_daily_customer_metrics() -> DataFrame:
         .agg(
             F.sum("amount").alias("total_spend"),
             F.count("order_id").alias("total_orders"),
+            F.sum(F.col("amount") * F.col("amount")).alias("sum_of_squares"),
             F.max("_processed_at").alias("last_active_time"),
+        )
+    )
+
+
+@dlt.table(
+    name="gold_daily_customer_analytics",
+    comment=GOLD_ANALYTICS_COMMENT,
+    table_properties={"quality": "gold"},
+)
+def gold_daily_customer_analytics() -> DataFrame:
+    """Derived analytics with statistical measures.
+
+    Calculates average order value, variance, and standard deviation.
+    """
+    return (
+        dlt.read("gold_daily_customer_metrics")
+        .withColumn("avg_order_value", F.col("total_spend") / F.col("total_orders"))
+        .withColumn(
+            "variance",
+            # Clamped to 0: the E[X^2] - E[X]^2 formula can go slightly
+            # negative under floating-point rounding, which would otherwise
+            # make sqrt() below silently return null instead of ~0.
+            F.greatest(
+                (F.col("sum_of_squares") / F.col("total_orders"))
+                - F.pow(F.col("total_spend") / F.col("total_orders"), 2),
+                F.lit(0.0),
+            ),
+        )
+        .withColumn("stddev", F.sqrt(F.col("variance")))
+        .select(
+            "customer_id",
+            "order_date",
+            "total_spend",
+            "total_orders",
+            "avg_order_value",
+            "stddev",
+            "last_active_time",
         )
     )
