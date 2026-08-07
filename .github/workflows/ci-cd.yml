@@ -4,6 +4,16 @@ on:
   pull_request:
   push:
     branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Bundle target to deploy (only used by deploy_dev/deploy_prod)
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
 
 env:
   PYTHON_VERSION: "3.10"
@@ -57,7 +67,10 @@ jobs:
     name: Deploy to dev
     runs-on: ubuntu-latest
     needs: validate
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.ref == 'refs/heads/develop' ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'dev')
     environment: dev
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +87,9 @@ jobs:
     name: Deploy to prod
     runs-on: ubuntu-latest
     needs: validate
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: >-
+      (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'prod')
     # Configure "Required reviewers" on the `prod` environment (Settings ->
     # Environments -> prod) so this job pauses for a manual approval click,
     # the equivalent of GitLab's `when: manual`. Without that setting, this
