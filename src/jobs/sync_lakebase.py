@@ -153,6 +153,25 @@ def read_gold_table(spark: SparkSession, table_name: str) -> DataFrame:
 # LakeBase sync
 # ---------------------------------------------------------------------------
 
+def connect_to_lakebase(conn: LakebaseConnection) -> "PGConnection":
+    """Open a psycopg2 connection to the LakeBase Postgres instance.
+
+    Raises:
+        RuntimeError: If psycopg2 is not available in the current environment.
+    """
+    if psycopg2 is None:
+        raise RuntimeError(
+            "psycopg2 is required to connect to LakeBase; install it on the job cluster."
+        )
+    return psycopg2.connect(
+        host=conn.host,
+        port=conn.port,
+        dbname=conn.database,
+        user=conn.username,
+        password=conn.password,
+    )
+
+
 def write_to_staging(df: DataFrame, conn: LakebaseConnection, staging_table: str) -> None:
     """Overwrite the Postgres staging table with the latest Gold snapshot.
 
@@ -197,11 +216,6 @@ def upsert_from_staging(
     Raises:
         RuntimeError: If psycopg2 is not available in the current environment.
     """
-    if psycopg2 is None:
-        raise RuntimeError(
-            "psycopg2 is required for the upsert step; install it on the job cluster."
-        )
-
     all_columns = key_columns + update_columns
     columns_sql = ", ".join(all_columns)
     conflict_sql = ", ".join(key_columns)
@@ -215,13 +229,7 @@ def upsert_from_staging(
     """
 
     logger.info("Upserting staging table '%s' into target '%s'", staging_table, target_table)
-    pg_conn: PGConnection = psycopg2.connect(
-        host=conn.host,
-        port=conn.port,
-        dbname=conn.database,
-        user=conn.username,
-        password=conn.password,
-    )
+    pg_conn = connect_to_lakebase(conn)
     try:
         with pg_conn:
             with pg_conn.cursor() as cursor:

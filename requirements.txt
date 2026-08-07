@@ -11,5 +11,6 @@
 pyspark==3.5.3
 databricks-dlt==0.3.0
 psycopg2-binary==2.9.9
+Faker==40.36.0
 pytest==8.3.3
 flake8==7.1.1
