@@ -263,6 +263,11 @@ workspace; these are the application-level Postgres credentials `sync_lakebase.p
   is also why `generate_synthetic_orders_job` deploys paused in every target and should never be
   manually unpaused in `prod`: there's no separate dev-only landing zone for it to write fake
   data into.
+- `sync_lakebase.py`'s Gold table reference **is** parameterized (fixed - it used to be a
+  hardcoded `main.orders.gold_daily_customer_metrics`, which meant `sync_lakebase_dev` was
+  silently reading `prod`'s schema instead of `orders_dev`). `databricks.yml` now passes
+  `--catalog`/`--schema` as job parameters from the bundle's `catalog`/`schema` variables, and
+  `sync_lakebase.py` builds the fully-qualified table name from those at runtime.
 - This repo is **public** on GitHub (required for branch protection and environment approval
   gates to work on the free plan). There's no live workspace credentials committed, but keep
   that in mind before adding anything sensitive.

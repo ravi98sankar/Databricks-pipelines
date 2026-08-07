@@ -9,7 +9,13 @@ import pytest
 from pyspark.sql import Row, SparkSession
 from pyspark.sql import functions as F
 
-from jobs.sync_lakebase import LakebaseConnection, get_secret
+from jobs.sync_lakebase import (
+    DEFAULT_CATALOG,
+    DEFAULT_SCHEMA,
+    LakebaseConnection,
+    get_secret,
+    parse_args,
+)
 from pipelines.orders_etl import _deduplicate_orders, _standardize_text_columns
 
 
@@ -100,3 +106,17 @@ def test_get_secret_raises_when_unresolved(monkeypatch):
 
     with pytest.raises(RuntimeError):
         get_secret(None, scope="lakebase", key="missing_key")
+
+
+def test_parse_args_defaults_when_run_standalone():
+    args = parse_args([])
+
+    assert args.catalog == DEFAULT_CATALOG
+    assert args.schema == DEFAULT_SCHEMA
+
+
+def test_parse_args_uses_job_supplied_catalog_and_schema():
+    args = parse_args(["--catalog", "main", "--schema", "orders_dev"])
+
+    assert args.catalog == "main"
+    assert args.schema == "orders_dev"
