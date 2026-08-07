@@ -163,10 +163,15 @@ deploys - the actual pipeline always runs against an already-active cluster sess
 
 | Job | Trigger | What it does |
 |---|---|---|
-| `lint_and_test` | PRs, pushes to `develop`/`main` | `flake8 src tests`, `pytest tests` |
-| `validate` | PRs, pushes to `develop`/`main` | Installs the Databricks CLI (`databricks/setup-cli`), runs `databricks bundle validate` |
-| `deploy_dev` | PRs, pushes to `develop` | `databricks bundle deploy -t dev` against the `dev` environment - no approval required |
-| `deploy_prod` | pushes to `main` | `databricks bundle deploy -t prod` against the `prod` environment - **queued, then paused** until a required reviewer approves it in the Actions run |
+| `lint_and_test` | PRs, pushes to `develop`/`main`, manual | `flake8 src tests`, `pytest tests` |
+| `validate` | PRs, pushes to `develop`/`main`, manual | Installs the Databricks CLI (`databricks/setup-cli`), runs `databricks bundle validate` |
+| `deploy_dev` | PRs, pushes to `develop`, manual with `target=dev` | `databricks bundle deploy -t dev` against the `dev` environment - no approval required |
+| `deploy_prod` | pushes to `main`, manual with `target=prod` | `databricks bundle deploy -t prod` against the `prod` environment - **queued, then paused** until a required reviewer approves it in the Actions run |
+
+**Manual runs**: Actions tab -> **CI/CD** -> **Run workflow** -> pick the branch and a `target` (`dev`/`prod`).
+`lint_and_test`/`validate` always run; whichever `deploy_*` job matches your chosen `target` runs
+too (the other one is skipped). `deploy_prod` still respects the `prod` environment's required
+reviewer regardless of how it was triggered.
 
 ### Branches
 
