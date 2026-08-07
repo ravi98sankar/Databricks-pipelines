@@ -8,8 +8,8 @@ Medallion-architecture orders pipeline built with **Databricks Asset Bundles (DA
   upserts it into a LakeBase (serverless Postgres) table over JDBC.
 - `databricks.yml` - The bundle definition: `dev` and `prod` targets, the pipeline resource, and
   the job resource (with its own job cluster and schedule).
-- `.gitlab-ci.yml` - Lints, tests, validates the bundle, and deploys it (`dev` automatically,
-  `prod` manually).
+- `.github/workflows/ci-cd.yml` - Lints, tests, validates the bundle, and deploys it (`dev`
+  automatically, `prod` behind a required approval).
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ Medallion-architecture orders pipeline built with **Databricks Asset Bundles (DA
 ## 1. Clone and set up a virtual environment
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/ravi98sankar/Databricks-pipelines.git
 cd Databricks-pipelines
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
@@ -75,7 +75,8 @@ databricks bundle deploy -t dev
 databricks bundle run orders_etl_pipeline -t dev
 databricks bundle run sync_lakebase_job -t dev
 
-# Deploy to prod (do this deliberately - the GitLab pipeline gates this behind a manual step)
+# Deploy to prod (do this deliberately - the GitHub Actions workflow gates this
+# behind a required approval on the `prod` environment)
 databricks bundle deploy -t prod
 ```
 
@@ -118,22 +119,39 @@ pytest tests              # runs against a local, in-process Spark session
 functions and the live JDBC/psycopg2 calls in `sync_lakebase.run()` are integration-level and are
 exercised by running the deployed pipeline/job in a workspace (Section 3), not by this unit suite.
 
-## 6. CI/CD (`.gitlab-ci.yml`)
+## 6. CI/CD (`.github/workflows/ci-cd.yml`)
 
-| Stage | Trigger | What it does |
+| Job | Trigger | What it does |
 |---|---|---|
-| `lint_and_test` | MRs, `develop`, `main` | `flake8 src tests`, `pytest tests` |
-| `validate` | MRs, `develop`, `main` | Installs the Databricks CLI, runs `databricks bundle validate` |
-| `deploy_dev` | MRs, pushes to `develop` | `databricks bundle deploy -t dev` |
-| `deploy_prod` | `main`, manual click | `databricks bundle deploy -t prod` |
+| `lint_and_test` | PRs, pushes to `develop`/`main` | `flake8 src tests`, `pytest tests` |
+| `validate` | PRs, pushes to `develop`/`main` | Installs the Databricks CLI (`databricks/setup-cli`), runs `databricks bundle validate` |
+| `deploy_dev` | PRs, pushes to `develop` | `databricks bundle deploy -t dev` against the `dev` environment - no approval required |
+| `deploy_prod` | pushes to `main` | `databricks bundle deploy -t prod` against the `prod` environment - **queued, then paused** until a required reviewer approves it in the Actions run |
 
-Set these as **masked, protected** CI/CD variables in GitLab (**Settings -> CI/CD -> Variables**):
+### Branches
 
-- `DATABRICKS_HOST`
-- `DATABRICKS_TOKEN`
+- `main` and `develop` both require a pull request with **at least 1 approval** before merging
+  (GitHub branch protection). Push directly to either and GitHub will reject it.
+- `prod` deploys only from `main`, and only after that branch's protection rules are satisfied
+  (the environment's `deployment_branch_policy` is restricted to protected branches).
 
-Scope them per environment (`dev` vs `prod`) if the two targets live in different workspaces or
-should use different service-principal tokens.
+### Environments and secrets
+
+The workflow reads `DATABRICKS_HOST` / `DATABRICKS_TOKEN` from **GitHub Actions environment
+secrets**, not repo-level secrets, so `dev` and `prod` can safely point at different workspaces
+or use different service-principal tokens. Set them once per environment:
+
+```bash
+gh secret set DATABRICKS_HOST --env dev --repo ravi98sankar/Databricks-pipelines
+gh secret set DATABRICKS_TOKEN --env dev --repo ravi98sankar/Databricks-pipelines
+gh secret set DATABRICKS_HOST --env prod --repo ravi98sankar/Databricks-pipelines
+gh secret set DATABRICKS_TOKEN --env prod --repo ravi98sankar/Databricks-pipelines
+```
+
+(or **Settings -> Environments -> [dev/prod] -> Add secret** in the browser). The `prod`
+environment also has a required reviewer configured (**Settings -> Environments -> prod ->
+Required reviewers**) - without at least one reviewer added there, `deploy_prod` would run
+automatically on every push to `main` instead of pausing for a manual approval click.
 
 ## Repo layout
 
@@ -142,7 +160,7 @@ should use different service-principal tokens.
 ├── databricks.yml               # Bundle: variables, pipeline + job resources, dev/prod targets
 ├── requirements.txt              # pyspark, databricks-dlt, psycopg2-binary, pytest, flake8
 ├── setup.cfg                     # flake8 config (max-line-length=100) + pytest pythonpath
-├── .gitlab-ci.yml                # lint_and_test -> validate -> deploy_dev / deploy_prod
+├── .github/workflows/ci-cd.yml   # lint_and_test -> validate -> deploy_dev / deploy_prod
 ├── src/
 │   ├── pipelines/orders_etl.py   # Bronze/Silver/Gold DLT pipeline
 │   └── jobs/sync_lakebase.py     # Gold -> LakeBase upsert job
@@ -158,3 +176,8 @@ should use different service-principal tokens.
   workspace before `sync_lakebase_job` will run successfully.
 - `RAW_ORDERS_PATH` in `orders_etl.py` (`/Volumes/main/orders_raw/landing/orders`) is a
   placeholder Unity Catalog volume - point it at your real landing zone.
+- This repo is **public** on GitHub (required for branch protection and environment approval
+  gates to work on the free plan). There's no live workspace credentials committed, but keep
+  that in mind before adding anything sensitive.
+- `.gitlab-ci.yml` is still present in the repo but is inert here - GitHub doesn't read it. It's
+  kept around only in case this project is ever mirrored into a GitLab instance too.
