@@ -5,3 +5,4 @@ __pycache__/
 .databricks/
 .ruff_cache/
 report.xml
+local_data/
