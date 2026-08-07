@@ -6,8 +6,12 @@ Medallion-architecture orders pipeline built with **Databricks Asset Bundles (DA
   ingestion) -> Silver (validated/deduplicated orders) -> Gold (daily customer spend metrics).
 - `src/jobs/sync_lakebase.py` - Scheduled job that reads the Gold table from Unity Catalog and
   upserts it into a LakeBase (serverless Postgres) table over JDBC.
-- `databricks.yml` - The bundle definition: `dev` and `prod` targets, the pipeline resource, and
-  the job resource (with its own job cluster and schedule).
+- `src/jobs/setup_resources.py` - One-time, idempotent setup job: creates the Unity Catalog
+  landing schema/volume and the LakeBase target table (applies `sql/*.sql`).
+- `src/jobs/generate_synthetic_orders.py` - Lands a batch of fake orders every 5 minutes so
+  `orders_etl_pipeline`'s Auto Loader has something to ingest. Deploys paused everywhere.
+- `sql/setup_unity_catalog.sql` / `sql/setup_lakebase.sql` - The DDL `setup_resources_job` applies.
+- `databricks.yml` - The bundle definition: `dev` and `prod` targets, and all four resources above.
 - `.github/workflows/ci-cd.yml` - Lints, tests, validates the bundle, and deploys it (`dev`
   automatically, `prod` behind a required approval).
 
@@ -32,8 +36,8 @@ pip install -r requirements.txt
 ```
 
 `requirements.txt` installs `pyspark`, `databricks-dlt` (the local unit-testing stub for `dlt`),
-`psycopg2-binary`, `pytest`, and `flake8` — everything needed to lint and test the code without a
-live workspace. **Do not** add `databricks-connect` to this same environment; it conflicts with
+`psycopg2-binary`, `Faker`, `pytest`, and `flake8` — everything needed to lint and test the code
+without a live workspace. **Do not** add `databricks-connect` to this same environment; it conflicts with
 plain `pyspark`. If you want to run/debug code against a real cluster from VS Code, create a
 *separate* venv with `databricks-connect` instead (see [Section 4](#4-run--debug-from-vs-code)).
 
@@ -68,10 +72,51 @@ different workspaces.
 # Check the bundle compiles and resources are well-formed (defaults to the `dev` target)
 databricks bundle validate
 
-# Deploy the pipeline + job to your dev workspace
+# Deploy everything to your dev workspace
 databricks bundle deploy -t dev
+```
 
-# Run the pipeline or job once, on demand
+`bundle deploy` uploads the source files under `src/` and creates/updates four resources:
+
+- **`orders_etl_<target>`** - the Lakeflow pipeline, catalog `main`, schema `orders_dev`/`orders`
+- **`sync_lakebase_<target>`** - the Gold -> LakeBase upsert job, scheduled daily at 06:00 UTC
+  (paused in `dev`, unpaused in `prod`)
+- **`setup_resources_<target>`** - the one-time DDL job, no schedule (run on demand)
+- **`generate_synthetic_orders_<target>`** - the fake-order generator, scheduled every 5 minutes,
+  **paused in every target** by default
+
+None of these will run successfully yet - two things need to happen first, in order:
+
+**a) Create the `lakebase` secret scope** (needed by both `setup_resources_job` and
+`sync_lakebase_job` to connect to Postgres):
+
+```bash
+databricks secrets create-scope lakebase
+databricks secrets put-secret lakebase jdbc_host
+databricks secrets put-secret lakebase jdbc_port
+databricks secrets put-secret lakebase jdbc_database
+databricks secrets put-secret lakebase jdbc_username
+databricks secrets put-secret lakebase jdbc_password
+```
+
+Each `put-secret` opens your editor to type the value (or set the equivalent uppercased env var
+on the cluster instead - see `get_secret()` in `sync_lakebase.py` for the fallback order).
+
+**b) Run the setup job once** to create the Unity Catalog landing schema/volume and the LakeBase
+target table (both idempotent - safe to re-run):
+
+```bash
+databricks bundle run setup_resources_job -t dev
+```
+
+Now the rest can run, in whatever order you like:
+
+```bash
+# Unpause the generator (or leave it paused and trigger it manually a few times)
+databricks jobs unpause --job-id <generate_synthetic_orders_dev job id>
+# or, without unpausing anything:
+databricks bundle run generate_synthetic_orders_job -t dev
+
 databricks bundle run orders_etl_pipeline -t dev
 databricks bundle run sync_lakebase_job -t dev
 
@@ -79,18 +124,6 @@ databricks bundle run sync_lakebase_job -t dev
 # behind a required approval on the `prod` environment)
 databricks bundle deploy -t prod
 ```
-
-`bundle deploy` uploads the source files under `src/` and creates/updates:
-
-- a Lakeflow Declarative Pipeline named `orders_etl_<target>` in catalog `main`
-  (schema `orders_dev` for `dev`, `orders` for `prod`)
-- a job named `sync_lakebase_<target>` on its own single-node job cluster, scheduled daily at
-  06:00 UTC (paused in `dev`, unpaused in `prod`)
-
-Before the `sync_lakebase` job can actually connect to LakeBase, create a secret scope named
-`lakebase` in the target workspace with keys `jdbc_host`, `jdbc_port`, `jdbc_database`,
-`jdbc_username`, `jdbc_password` (or set the equivalent uppercased env vars on the cluster - see
-`get_secret()` in `sync_lakebase.py` for the fallback order).
 
 ## 4. Run / debug from VS Code
 
@@ -113,11 +146,18 @@ flake8 src tests          # line-length/style is configured in setup.cfg (100 co
 pytest tests              # runs against a local, in-process Spark session
 ```
 
-`tests/test_transformations.py` covers the pure helpers that don't need a live workspace:
-`_standardize_text_columns` / `_deduplicate_orders` from the pipeline, and
-`LakebaseConnection` / `get_secret` from the sync job. The `dlt.table`-decorated pipeline
-functions and the live JDBC/psycopg2 calls in `sync_lakebase.run()` are integration-level and are
-exercised by running the deployed pipeline/job in a workspace (Section 3), not by this unit suite.
+`tests/test_transformations.py` covers `LakebaseConnection` / `get_secret` from the sync job.
+`tests/test_generate_synthetic_orders.py` covers the fake-order generator's pure logic
+(`generate_order` / `generate_batch` / `write_batch`), including that a seed makes a whole batch
+reproducible. The `dlt.table`-decorated pipeline functions and the live JDBC/psycopg2/DDL calls
+in `sync_lakebase.run()` and `setup_resources.run()` are integration-level and are exercised by
+running the deployed pipeline/jobs in a workspace (Section 3), not by this unit suite.
+
+Two tests in `test_transformations.py` (`_standardize_text_columns` / `_deduplicate_orders`) are
+currently `@pytest.mark.skip`ped: the `pyspark` build that comes down alongside `databricks-dlt`
+has Databricks-internal patches that reject `SparkSession.builder.getOrCreate()` outside
+Databricks Connect, so they can't create a local session in this environment. Doesn't affect real
+deploys - the actual pipeline always runs against an already-active cluster session.
 
 ## 6. CI/CD (`.github/workflows/ci-cd.yml`)
 
@@ -157,28 +197,38 @@ automatically on every push to `main` instead of pausing for a manual approval c
 
 ```
 .
-├── databricks.yml               # Bundle: variables, pipeline + job resources, dev/prod targets
-├── requirements.txt              # pyspark, databricks-dlt, psycopg2-binary, pytest, flake8
+├── databricks.yml               # Bundle: variables, all 4 resources, dev/prod targets
+├── requirements.txt              # pyspark, databricks-dlt, psycopg2-binary, Faker, pytest, flake8
 ├── setup.cfg                     # flake8 config (max-line-length=100) + pytest pythonpath
 ├── .github/workflows/ci-cd.yml   # lint_and_test -> validate -> deploy_dev / deploy_prod
+├── sql/
+│   ├── setup_unity_catalog.sql   # Landing schema + volume DDL (idempotent)
+│   └── setup_lakebase.sql        # LakeBase target table DDL (idempotent)
 ├── src/
-│   ├── pipelines/orders_etl.py   # Bronze/Silver/Gold DLT pipeline
-│   └── jobs/sync_lakebase.py     # Gold -> LakeBase upsert job
+│   ├── pipelines/orders_etl.py             # Bronze/Silver/Gold DLT pipeline
+│   └── jobs/
+│       ├── sync_lakebase.py                # Gold -> LakeBase upsert job
+│       ├── setup_resources.py              # Applies sql/*.sql - run once, on demand
+│       └── generate_synthetic_orders.py    # Fake-order generator - scheduled, paused by default
 └── tests/
-    └── test_transformations.py   # Unit tests for the pure helper functions above
+    ├── test_transformations.py             # LakebaseConnection / get_secret unit tests
+    └── test_generate_synthetic_orders.py   # Generator unit tests
 ```
 
 ## Known gaps / things to adjust before real deployment
 
-- Both resources run on **serverless compute** (`serverless: true` on the pipeline,
-  no cluster spec on the job - just an `environment_key`/`environments` block for
-  `psycopg2-binary`). This is cloud-agnostic by design, but only works if serverless is
-  enabled for your workspace; if not, you'll need to add a `job_clusters`/`new_cluster`
-  spec back for the job and drop `serverless: true` from the pipeline.
+- All four resources run on **serverless compute** (`serverless: true` on the pipeline, no
+  cluster spec on any job - just an `environment_key`/`environments` block per job for its pip
+  dependencies). This is cloud-agnostic by design, but only works if serverless is enabled for
+  your workspace; if not, you'll need to add a `job_clusters`/`new_cluster` spec back to each job
+  and drop `serverless: true` from the pipeline.
 - The `lakebase` secret scope isn't created by the bundle - it must exist in each target
-  workspace before `sync_lakebase_job` will run successfully.
-- `RAW_ORDERS_PATH` in `orders_etl.py` (`/Volumes/main/orders_raw/landing/orders`) is a
-  placeholder Unity Catalog volume - point it at your real landing zone.
+  workspace (Section 3a) before `setup_resources_job` or `sync_lakebase_job` will run successfully.
+- `RAW_ORDERS_PATH` in `orders_etl.py` (`/Volumes/main/orders_raw/landing/orders`) is **not**
+  parameterized per target - `dev` and `prod` pipelines read from the same landing volume. This
+  is also why `generate_synthetic_orders_job` deploys paused in every target and should never be
+  manually unpaused in `prod`: there's no separate dev-only landing zone for it to write fake
+  data into.
 - This repo is **public** on GitHub (required for branch protection and environment approval
   gates to work on the free plan). There's no live workspace credentials committed, but keep
   that in mind before adding anything sensitive.

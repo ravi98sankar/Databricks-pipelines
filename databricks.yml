@@ -23,6 +23,24 @@ resources:
             path: ./src/pipelines/orders_etl.py
 
   jobs:
+    # Idempotent, on-demand setup: creates the Unity Catalog landing
+    # schema/volume and the LakeBase target table. No schedule - run it
+    # manually (`databricks bundle run setup_resources_job -t <target>`)
+    # once per workspace before the pipeline/other jobs can succeed.
+    setup_resources_job:
+      name: setup_resources_${bundle.target}
+      tasks:
+        - task_key: setup_resources
+          spark_python_task:
+            python_file: ./src/jobs/setup_resources.py
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - psycopg2-binary
+
     sync_lakebase_job:
       name: sync_lakebase_${bundle.target}
       tasks:
@@ -43,6 +61,30 @@ resources:
               - psycopg2-binary
       schedule:
         quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: UTC
+        pause_status: PAUSED
+
+    # Lands a batch of fake orders every 5 minutes for orders_etl_pipeline's
+    # Auto Loader to pick up. Deploys PAUSED in every target - unpause it
+    # manually when you want to see data flow (see README). Never unpause
+    # this in prod: it's test-data generation, not a real data source, and
+    # it writes to the same landing volume orders_etl_pipeline always reads
+    # from (RAW_ORDERS_PATH is not parameterized per target).
+    generate_synthetic_orders_job:
+      name: generate_synthetic_orders_${bundle.target}
+      tasks:
+        - task_key: generate_synthetic_orders
+          spark_python_task:
+            python_file: ./src/jobs/generate_synthetic_orders.py
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            dependencies:
+              - Faker
+      schedule:
+        quartz_cron_expression: "0 */5 * * * ?"
         timezone_id: UTC
         pause_status: PAUSED
 
