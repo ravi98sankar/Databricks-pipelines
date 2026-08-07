@@ -15,6 +15,7 @@ resources:
       name: orders_etl_${bundle.target}
       catalog: ${var.catalog}
       target: ${var.schema}
+      serverless: true
       development: true
       continuous: false
       libraries:
@@ -26,36 +27,31 @@ resources:
       name: sync_lakebase_${bundle.target}
       tasks:
         - task_key: sync_lakebase
-          job_cluster_key: default_cluster
           spark_python_task:
             python_file: ./src/jobs/sync_lakebase.py
-          # psycopg2 is not preinstalled on Databricks Runtime; sync_lakebase.py
-          # needs it for the ON CONFLICT upsert against LakeBase/Postgres.
-          libraries:
-            - pypi:
-                package: psycopg2-binary
-      job_clusters:
-        - job_cluster_key: default_cluster
-          new_cluster:
-            spark_version: "15.4.x-scala2.12"
-            # Placeholder node type for Azure Databricks; swap for your cloud,
-            # e.g. "i3.xlarge" on AWS or "n2-standard-4" on GCP.
-            node_type_id: "Standard_DS3_v2"
-            num_workers: 1
-            spark_conf:
-              spark.databricks.sql.initial.catalog.name: ${var.catalog}
-            data_security_mode: SINGLE_USER
+          # Serverless compute (no job_cluster_key / new_cluster - this
+          # workspace only allows serverless). Extra pip dependencies for a
+          # serverless task go in environments: below, not cluster libraries.
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"
+            # psycopg2 is not preinstalled; sync_lakebase.py needs it for the
+            # ON CONFLICT upsert against LakeBase/Postgres.
+            dependencies:
+              - psycopg2-binary
       schedule:
         quartz_cron_expression: "0 0 6 * * ?"
         timezone_id: UTC
         pause_status: PAUSED
 
 # `workspace.host` is intentionally omitted for both targets: the CLI resolves
-# the workspace from the DATABRICKS_HOST / DATABRICKS_TOKEN env vars (set in
-# .gitlab-ci.yml) or from a local `databricks auth login` profile. Add an
-# explicit `workspace: {host: https://<workspace>.azuredatabricks.net}` per
-# target if dev and prod live in different workspaces and you don't want to
-# rely on env vars to select between them.
+# the workspace from the DATABRICKS_HOST / DATABRICKS_TOKEN env vars (set as
+# GitHub Actions environment secrets, or via a local `databricks auth login`
+# profile). Add an explicit `workspace: {host: https://<workspace>.azuredatabricks.net}`
+# per target if dev and prod live in different workspaces and you don't want
+# to rely on env vars to select between them.
 targets:
   dev:
     mode: development
