@@ -1,0 +1,15 @@
+# Runtime/test dependencies for local development, linting, and CI.
+# Databricks Runtime provides pyspark, dlt, and cluster-installed libraries
+# on-platform; these pins let the code import and unit-test correctly off-platform
+# (locally in VS Code, and in GitLab CI).
+#
+# Do NOT add databricks-connect to this file: it conflicts with the plain
+# pyspark install below (they patch the same namespace). If you want to run
+# code against a live cluster from VS Code, install databricks-connect in a
+# separate virtual environment instead - see README.md.
+
+pyspark==3.5.3
+databricks-dlt==0.4.9
+psycopg2-binary==2.9.9
+pytest==8.3.3
+flake8==7.1.1

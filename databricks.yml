@@ -1,0 +1,87 @@
+bundle:
+  name: databricks_pipelines
+
+variables:
+  catalog:
+    description: Unity Catalog catalog used by this bundle's tables.
+    default: main
+  schema:
+    description: Schema (database) that holds the orders bronze/silver/gold tables.
+    default: orders
+
+resources:
+  pipelines:
+    orders_etl_pipeline:
+      name: orders_etl_${bundle.target}
+      catalog: ${var.catalog}
+      target: ${var.schema}
+      development: true
+      continuous: false
+      libraries:
+        - file:
+            path: ./src/pipelines/orders_etl.py
+
+  jobs:
+    sync_lakebase_job:
+      name: sync_lakebase_${bundle.target}
+      tasks:
+        - task_key: sync_lakebase
+          job_cluster_key: default_cluster
+          spark_python_task:
+            python_file: ./src/jobs/sync_lakebase.py
+          # psycopg2 is not preinstalled on Databricks Runtime; sync_lakebase.py
+          # needs it for the ON CONFLICT upsert against LakeBase/Postgres.
+          libraries:
+            - pypi:
+                package: psycopg2-binary
+      job_clusters:
+        - job_cluster_key: default_cluster
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            # Placeholder node type for Azure Databricks; swap for your cloud,
+            # e.g. "i3.xlarge" on AWS or "n2-standard-4" on GCP.
+            node_type_id: "Standard_DS3_v2"
+            num_workers: 1
+            spark_conf:
+              spark.databricks.sql.initial.catalog.name: ${var.catalog}
+            data_security_mode: SINGLE_USER
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: UTC
+        pause_status: PAUSED
+
+# `workspace.host` is intentionally omitted for both targets: the CLI resolves
+# the workspace from the DATABRICKS_HOST / DATABRICKS_TOKEN env vars (set in
+# .gitlab-ci.yml) or from a local `databricks auth login` profile. Add an
+# explicit `workspace: {host: https://<workspace>.azuredatabricks.net}` per
+# target if dev and prod live in different workspaces and you don't want to
+# rely on env vars to select between them.
+targets:
+  dev:
+    mode: development
+    default: true
+    variables:
+      catalog: main
+      schema: orders_dev
+    resources:
+      jobs:
+        sync_lakebase_job:
+          schedule:
+            pause_status: PAUSED
+
+  prod:
+    mode: production
+    variables:
+      catalog: main
+      schema: orders
+    resources:
+      pipelines:
+        orders_etl_pipeline:
+          development: false
+      jobs:
+        sync_lakebase_job:
+          schedule:
+            pause_status: UNPAUSED
+    permissions:
+      - level: CAN_MANAGE_RUN
+        group_name: data-engineers

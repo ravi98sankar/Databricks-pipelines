@@ -1,0 +1,83 @@
+stages:
+  - lint_and_test
+  - validate
+  - deploy_dev
+  - deploy_prod
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+default:
+  image: python:3.10-slim
+  cache:
+    key: "pip-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .cache/pip
+
+.install_python_deps: &install_python_deps
+  - python -m pip install --upgrade pip
+  - pip install flake8 pytest
+  - if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+.install_databricks_cli: &install_databricks_cli
+  - curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+
+lint_and_test:
+  stage: lint_and_test
+  before_script:
+    - *install_python_deps
+  script:
+    - flake8 src tests
+    - pytest tests --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+validate:
+  stage: validate
+  before_script:
+    - *install_databricks_cli
+  script:
+    - databricks bundle validate
+  variables:
+    DATABRICKS_HOST: "$DATABRICKS_HOST"
+    DATABRICKS_TOKEN: "$DATABRICKS_TOKEN"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH == "main"
+
+deploy_dev:
+  stage: deploy_dev
+  before_script:
+    - *install_databricks_cli
+  script:
+    - databricks bundle deploy -t dev
+  environment:
+    name: dev
+  variables:
+    DATABRICKS_HOST: "$DATABRICKS_HOST"
+    DATABRICKS_TOKEN: "$DATABRICKS_TOKEN"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+deploy_prod:
+  stage: deploy_prod
+  before_script:
+    - *install_databricks_cli
+  script:
+    - databricks bundle deploy -t prod
+  environment:
+    name: prod
+  variables:
+    DATABRICKS_HOST: "$DATABRICKS_HOST"
+    DATABRICKS_TOKEN: "$DATABRICKS_TOKEN"
+  when: manual
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

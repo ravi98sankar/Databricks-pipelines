@@ -1,0 +1,88 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  lint_and_test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      - run: flake8 src tests
+
+      - run: pytest tests --junitxml=report.xml
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: report.xml
+
+  validate:
+    name: Validate bundle
+    runs-on: ubuntu-latest
+    needs: lint_and_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: databricks bundle validate
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle validate
+
+  deploy_dev:
+    name: Deploy to dev
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: databricks bundle deploy -t dev
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle deploy -t dev
+
+  deploy_prod:
+    name: Deploy to prod
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Configure "Required reviewers" on the `prod` environment (Settings ->
+    # Environments -> prod) so this job pauses for a manual approval click,
+    # the equivalent of GitLab's `when: manual`. Without that setting, this
+    # job deploys automatically as soon as `validate` passes on main.
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: databricks bundle deploy -t prod
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle deploy -t prod
