@@ -82,6 +82,23 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: databricks bundle deploy -t dev
 
+      - name: Provision lakebase secret scope
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          LAKEBASE_JDBC_HOST: ${{ secrets.LAKEBASE_JDBC_HOST }}
+          LAKEBASE_JDBC_PORT: ${{ secrets.LAKEBASE_JDBC_PORT }}
+          LAKEBASE_JDBC_DATABASE: ${{ secrets.LAKEBASE_JDBC_DATABASE }}
+          LAKEBASE_JDBC_USERNAME: ${{ secrets.LAKEBASE_JDBC_USERNAME }}
+          LAKEBASE_JDBC_PASSWORD: ${{ secrets.LAKEBASE_JDBC_PASSWORD }}
+        run: |
+          databricks secrets create-scope lakebase || true
+          databricks secrets put-secret lakebase jdbc_host --string-value "$LAKEBASE_JDBC_HOST"
+          databricks secrets put-secret lakebase jdbc_port --string-value "$LAKEBASE_JDBC_PORT"
+          databricks secrets put-secret lakebase jdbc_database --string-value "$LAKEBASE_JDBC_DATABASE"
+          databricks secrets put-secret lakebase jdbc_username --string-value "$LAKEBASE_JDBC_USERNAME"
+          databricks secrets put-secret lakebase jdbc_password --string-value "$LAKEBASE_JDBC_PASSWORD"
+
   deploy_prod:
     name: Deploy to prod
     runs-on: ubuntu-latest
@@ -104,3 +121,20 @@ jobs:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: databricks bundle deploy -t prod
+
+      - name: Provision lakebase secret scope
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          LAKEBASE_JDBC_HOST: ${{ secrets.LAKEBASE_JDBC_HOST }}
+          LAKEBASE_JDBC_PORT: ${{ secrets.LAKEBASE_JDBC_PORT }}
+          LAKEBASE_JDBC_DATABASE: ${{ secrets.LAKEBASE_JDBC_DATABASE }}
+          LAKEBASE_JDBC_USERNAME: ${{ secrets.LAKEBASE_JDBC_USERNAME }}
+          LAKEBASE_JDBC_PASSWORD: ${{ secrets.LAKEBASE_JDBC_PASSWORD }}
+        run: |
+          databricks secrets create-scope lakebase || true
+          databricks secrets put-secret lakebase jdbc_host --string-value "$LAKEBASE_JDBC_HOST"
+          databricks secrets put-secret lakebase jdbc_port --string-value "$LAKEBASE_JDBC_PORT"
+          databricks secrets put-secret lakebase jdbc_database --string-value "$LAKEBASE_JDBC_DATABASE"
+          databricks secrets put-secret lakebase jdbc_username --string-value "$LAKEBASE_JDBC_USERNAME"
+          databricks secrets put-secret lakebase jdbc_password --string-value "$LAKEBASE_JDBC_PASSWORD"
