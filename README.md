@@ -88,7 +88,9 @@ databricks bundle deploy -t dev
 None of these will run successfully yet - two things need to happen first, in order:
 
 **a) Create the `lakebase` secret scope** (needed by both `setup_resources_job` and
-`sync_lakebase_job` to connect to Postgres):
+`sync_lakebase_job` to connect to Postgres). Two ways to do this - pick one:
+
+*Manually, once, from your own machine:*
 
 ```bash
 databricks secrets create-scope lakebase
@@ -101,6 +103,22 @@ databricks secrets put-secret lakebase jdbc_password
 
 Each `put-secret` opens your editor to type the value (or set the equivalent uppercased env var
 on the cluster instead - see `get_secret()` in `sync_lakebase.py` for the fallback order).
+
+*Or automatically, via CI* - both `deploy_dev` and `deploy_prod` in `.github/workflows/ci-cd.yml`
+run a "Provision lakebase secret scope" step after deploying, which creates the scope (if missing)
+and sets all five keys from that environment's GitHub Actions secrets:
+
+```bash
+gh secret set LAKEBASE_JDBC_HOST --env dev --repo ravi98sankar/Databricks-pipelines
+gh secret set LAKEBASE_JDBC_PORT --env dev --repo ravi98sankar/Databricks-pipelines
+gh secret set LAKEBASE_JDBC_DATABASE --env dev --repo ravi98sankar/Databricks-pipelines
+gh secret set LAKEBASE_JDBC_USERNAME --env dev --repo ravi98sankar/Databricks-pipelines
+gh secret set LAKEBASE_JDBC_PASSWORD --env dev --repo ravi98sankar/Databricks-pipelines
+```
+
+(repeat with `--env prod` for prod's own LakeBase instance). Once these are set, every deploy
+keeps the secret scope in sync automatically - rotate the LakeBase password by updating the
+GitHub secret, and the next deploy pushes the new value, no manual CLI step needed.
 
 **b) Run the setup job once** to create the Unity Catalog landing schema/volume and the LakeBase
 target table (both idempotent - safe to re-run):
@@ -201,6 +219,13 @@ gh secret set DATABRICKS_TOKEN --env prod --repo ravi98sankar/Databricks-pipelin
 environment also has a required reviewer configured (**Settings -> Environments -> prod ->
 Required reviewers**) - without at least one reviewer added there, `deploy_prod` would run
 automatically on every push to `main` instead of pausing for a manual approval click.
+
+Both `deploy_dev` and `deploy_prod` also provision the `lakebase` secret scope from five more
+environment secrets per target - `LAKEBASE_JDBC_HOST`, `LAKEBASE_JDBC_PORT`,
+`LAKEBASE_JDBC_DATABASE`, `LAKEBASE_JDBC_USERNAME`, `LAKEBASE_JDBC_PASSWORD` (see Section 3a).
+These are unrelated to `DATABRICKS_HOST`/`DATABRICKS_TOKEN` - those authenticate the CLI to the
+workspace; these are the application-level Postgres credentials `sync_lakebase.py` and
+`setup_resources.py` read via `dbutils.secrets.get()` at runtime.
 
 ## Repo layout
 
