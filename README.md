@@ -170,8 +170,11 @@ automatically on every push to `main` instead of pausing for a manual approval c
 
 ## Known gaps / things to adjust before real deployment
 
-- `databricks.yml`'s job cluster uses `node_type_id: Standard_DS3_v2` (Azure). Swap it for an
-  AWS/GCP instance type if your workspace isn't on Azure.
+- Both resources run on **serverless compute** (`serverless: true` on the pipeline,
+  no cluster spec on the job - just an `environment_key`/`environments` block for
+  `psycopg2-binary`). This is cloud-agnostic by design, but only works if serverless is
+  enabled for your workspace; if not, you'll need to add a `job_clusters`/`new_cluster`
+  spec back for the job and drop `serverless: true` from the pipeline.
 - The `lakebase` secret scope isn't created by the bundle - it must exist in each target
   workspace before `sync_lakebase_job` will run successfully.
 - `RAW_ORDERS_PATH` in `orders_etl.py` (`/Volumes/main/orders_raw/landing/orders`) is a
