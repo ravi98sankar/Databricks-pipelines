@@ -37,7 +37,7 @@ resources:
       environments:
         - environment_key: default
           spec:
-            client: "1"
+            environment_version: '2'
             dependencies:
               - psycopg2-binary
 
@@ -54,7 +54,7 @@ resources:
       environments:
         - environment_key: default
           spec:
-            client: "1"
+            environment_version: '2'
             # psycopg2 is not preinstalled; sync_lakebase.py needs it for the
             # ON CONFLICT upsert against LakeBase/Postgres.
             dependencies:
@@ -80,7 +80,7 @@ resources:
       environments:
         - environment_key: default
           spec:
-            client: "1"
+            environment_version: '2'
             dependencies:
               - Faker
       schedule:
