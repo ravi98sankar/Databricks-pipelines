@@ -6,10 +6,12 @@ upsert from staging into the target LakeBase table. Intended to run as a
 scheduled Databricks Job task.
 """
 
+import argparse
 import logging
 import os
 import sys
 from dataclasses import dataclass
+from typing import Optional
 
 from pyspark.sql import DataFrame, SparkSession
 
@@ -29,7 +31,14 @@ except ImportError:  # pragma: no cover - installed via cluster library
 # Configuration
 # ---------------------------------------------------------------------------
 
-GOLD_TABLE = "main.orders.gold_daily_customer_metrics"
+# Catalog/schema default to the values used when this script is run
+# standalone (no --catalog/--schema args). The deployed job always passes
+# both explicitly via job parameters templated from the bundle's catalog/
+# schema variables (see databricks.yml) - the schema differs per target
+# (orders_dev vs orders), so it can't be a fixed module-level constant.
+DEFAULT_CATALOG = "main"
+DEFAULT_SCHEMA = "orders"
+GOLD_TABLE_NAME = "gold_daily_customer_metrics"
 STAGING_TABLE = "staging_daily_customer_metrics"
 TARGET_TABLE = "daily_customer_metrics"
 KEY_COLUMNS = ["customer_id", "order_date"]
@@ -243,14 +252,25 @@ def upsert_from_staging(
 # Entry point
 # ---------------------------------------------------------------------------
 
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    """Parse --catalog/--schema, defaulting to standalone-run values."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--catalog", default=DEFAULT_CATALOG)
+    parser.add_argument("--schema", default=DEFAULT_SCHEMA)
+    return parser.parse_args(argv)
+
+
 def run() -> None:
     """Execute the full Gold -> LakeBase sync workflow."""
+    args = parse_args()
+    gold_table = f"{args.catalog}.{args.schema}.{GOLD_TABLE_NAME}"
+
     spark = build_spark_session()
     dbutils = DBUtils(spark) if DBUtils is not None else None
 
     try:
         conn = load_lakebase_connection(dbutils)
-        gold_df = read_gold_table(spark, GOLD_TABLE)
+        gold_df = read_gold_table(spark, gold_table)
         write_to_staging(gold_df, conn, STAGING_TABLE)
         upsert_from_staging(conn, STAGING_TABLE, TARGET_TABLE, KEY_COLUMNS, UPDATE_COLUMNS)
         logger.info("LakeBase sync completed successfully.")

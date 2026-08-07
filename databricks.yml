@@ -47,6 +47,14 @@ resources:
         - task_key: sync_lakebase
           spark_python_task:
             python_file: ./src/jobs/sync_lakebase.py
+            # Without these, sync_lakebase.py defaults to reading
+            # main.orders.gold_daily_customer_metrics regardless of target -
+            # wrong for dev, which writes to orders_dev instead.
+            parameters:
+              - "--catalog"
+              - ${var.catalog}
+              - "--schema"
+              - ${var.schema}
           # Serverless compute (no job_cluster_key / new_cluster - this
           # workspace only allows serverless). Extra pip dependencies for a
           # serverless task go in environments: below, not cluster libraries.
