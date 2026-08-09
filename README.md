@@ -5,7 +5,8 @@ Medallion-architecture orders pipeline built with **Databricks Asset Bundles (DA
 - `src/pipelines/orders_etl.py` - Lakeflow Declarative Pipeline (DLT). Bronze (Auto Loader
   ingestion) -> Silver (validated/deduplicated orders) -> Gold (daily customer spend metrics).
 - `src/jobs/sync_lakebase.py` - Scheduled job that reads the Gold table from Unity Catalog and
-  upserts it into a LakeBase (serverless Postgres) table over JDBC.
+  upserts it into a LakeBase (serverless Postgres) table, via Databricks' native "postgresql"
+  data source for the staging write and psycopg2 for the upsert.
 - `src/jobs/setup_resources.py` - One-time, idempotent setup job: creates the Unity Catalog
   landing schema/volume and the LakeBase target table (applies `sql/*.sql`).
 - `src/jobs/generate_synthetic_orders.py` - Lands a batch of fake orders every 5 minutes so
