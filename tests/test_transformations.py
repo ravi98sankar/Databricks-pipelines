@@ -9,13 +9,7 @@ import pytest
 from pyspark.sql import Row, SparkSession
 from pyspark.sql import functions as F
 
-from jobs.sync_lakebase import (
-    DEFAULT_CATALOG,
-    DEFAULT_SCHEMA,
-    LakebaseConnection,
-    get_secret,
-    parse_args,
-)
+from jobs.sync_lakebase import DEFAULT_CATALOG, DEFAULT_SCHEMA, get_secret, parse_args
 from pipelines.orders_etl import _deduplicate_orders, _standardize_text_columns
 
 
@@ -65,34 +59,6 @@ def test_deduplicate_orders_drops_duplicate_order_ids(spark):
 
     order_ids = sorted(row.order_id for row in result.collect())
     assert order_ids == ["o1", "o2"]
-
-
-def test_lakebase_connection_jdbc_url():
-    conn = LakebaseConnection(
-        host="db.example.com",
-        port="5432",
-        database="app",
-        username="reader",
-        password="secret",
-    )
-
-    assert conn.jdbc_url == "jdbc:postgresql://db.example.com:5432/app"
-
-
-def test_lakebase_connection_properties():
-    conn = LakebaseConnection(
-        host="db.example.com",
-        port="5432",
-        database="app",
-        username="reader",
-        password="secret",
-    )
-
-    assert conn.connection_properties == {
-        "user": "reader",
-        "password": "secret",
-        "driver": "org.postgresql.Driver",
-    }
 
 
 def test_get_secret_falls_back_to_env_var(monkeypatch):

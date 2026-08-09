@@ -1,9 +1,11 @@
 """Sync the curated Gold table to Databricks LakeBase (Serverless Postgres).
 
 Reads ``gold_daily_customer_metrics`` from Unity Catalog, stages it into a
-Postgres staging table over JDBC, then performs an ``INSERT ... ON CONFLICT``
-upsert from staging into the target LakeBase table. Intended to run as a
-scheduled Databricks Job task.
+Postgres staging table via Databricks' native "postgresql" data source, then
+performs an ``INSERT ... ON CONFLICT`` upsert from staging into the target
+LakeBase table (via psycopg2, since that step needs an arbitrary SQL
+statement rather than a DataFrame write). Intended to run as a scheduled
+Databricks Job task.
 """
 
 import argparse
@@ -67,20 +69,6 @@ class LakebaseConnection:
     database: str
     username: str
     password: str
-
-    @property
-    def jdbc_url(self) -> str:
-        """Build the JDBC connection URL for Spark's JDBC writer."""
-        return f"jdbc:postgresql://{self.host}:{self.port}/{self.database}"
-
-    @property
-    def connection_properties(self) -> dict[str, str]:
-        """Connection properties passed to Spark's JDBC writer."""
-        return {
-            "user": self.username,
-            "password": self.password,
-            "driver": "org.postgresql.Driver",
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +172,12 @@ def connect_to_lakebase(conn: LakebaseConnection) -> "PGConnection":
 def write_to_staging(df: DataFrame, conn: LakebaseConnection, staging_table: str) -> None:
     """Overwrite the Postgres staging table with the latest Gold snapshot.
 
+    Uses Databricks' native/bundled "postgresql" data source rather than
+    generic "jdbc" - serverless compute's DML allow-list rejects bare jdbc
+    writes (INVALID_PARAMETER_VALUE / UNSUPPORTED_DATA_SOURCE_WRITE), but
+    explicitly permits this named connector for batch writes. See
+    https://docs.databricks.com/aws/en/connect/spark-data-sources-serverless-writes.
+
     Args:
         df: DataFrame to stage.
         conn: LakeBase connection details.
@@ -191,12 +185,13 @@ def write_to_staging(df: DataFrame, conn: LakebaseConnection, staging_table: str
     """
     logger.info("Writing %d rows to staging table '%s'", df.count(), staging_table)
     (
-        df.write.format("jdbc")
-        .option("url", conn.jdbc_url)
+        df.write.format("postgresql")
+        .option("host", conn.host)
+        .option("port", conn.port)
+        .option("database", conn.database)
         .option("dbtable", staging_table)
-        .option("user", conn.connection_properties["user"])
-        .option("password", conn.connection_properties["password"])
-        .option("driver", conn.connection_properties["driver"])
+        .option("user", conn.username)
+        .option("password", conn.password)
         .mode("overwrite")
         .save()
     )
