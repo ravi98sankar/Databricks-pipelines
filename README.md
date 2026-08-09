@@ -37,8 +37,8 @@ pip install -r requirements.txt
 ```
 
 `requirements.txt` installs `pyspark`, `databricks-dlt` (the local unit-testing stub for `dlt`),
-`psycopg2-binary`, `Faker`, `pytest`, and `flake8` — everything needed to lint and test the code
-without a live workspace. **Do not** add `databricks-connect` to this same environment; it conflicts with
+`psycopg2-binary`, `Faker`, `databricks-sdk`, `pytest`, and `flake8` — everything needed to lint
+and test the code without a live workspace. **Do not** add `databricks-connect` to this same environment; it conflicts with
 plain `pyspark`. If you want to run/debug code against a real cluster from VS Code, create a
 *separate* venv with `databricks-connect` instead (see [Section 4](#4-run--debug-from-vs-code)).
 
@@ -99,11 +99,33 @@ databricks secrets put-secret lakebase jdbc_host
 databricks secrets put-secret lakebase jdbc_port
 databricks secrets put-secret lakebase jdbc_database
 databricks secrets put-secret lakebase jdbc_username
-databricks secrets put-secret lakebase jdbc_password
+databricks secrets put-secret lakebase instance_name
 ```
 
 Each `put-secret` opens your editor to type the value (or set the equivalent uppercased env var
 on the cluster instead - see `get_secret()` in `sync_lakebase.py` for the fallback order).
+
+Notice there's no `jdbc_password` - LakeBase authenticates over OAuth, not a static password.
+`sync_lakebase.py` mints a fresh 60-minute database credential on every run via
+`WorkspaceClient().database.generate_database_credential()`, using `instance_name` (the LakeBase
+database instance's name in the workspace - **not** the JDBC database name) to say which instance
+to mint it for. Nothing to rotate, and no password to leak from a secret scope.
+
+`jdbc_username` must be a Postgres role that already exists on the LakeBase instance and matches
+whatever identity the job runs as (a user's email or a service principal's application ID) - OAuth
+authenticates as that identity, so the role has to correspond to it. Create it once via the
+`databricks_auth` extension, from a Postgres client connected to the instance:
+
+```sql
+-- For a job running as a Databricks user:
+SELECT databricks_create_role('<user-email>', 'USER');
+-- For a job running as a service principal:
+SELECT databricks_create_role('<application-id>', 'SERVICE_PRINCIPAL');
+```
+
+See [Create Postgres roles](https://docs.databricks.com/aws/en/oltp/projects/postgres-roles) for
+the full reference - which identity type applies depends on how the job's `run_as` is configured
+(unset in this bundle, so it defaults to whichever identity deploys/triggers it).
 
 *Or automatically, via CI* - both `deploy_dev` and `deploy_prod` in `.github/workflows/ci-cd.yml`
 run a "Provision lakebase secret scope" step after deploying, which creates the scope (if missing)
@@ -114,12 +136,11 @@ gh secret set LAKEBASE_JDBC_HOST --env dev --repo ravi98sankar/Databricks-pipeli
 gh secret set LAKEBASE_JDBC_PORT --env dev --repo ravi98sankar/Databricks-pipelines
 gh secret set LAKEBASE_JDBC_DATABASE --env dev --repo ravi98sankar/Databricks-pipelines
 gh secret set LAKEBASE_JDBC_USERNAME --env dev --repo ravi98sankar/Databricks-pipelines
-gh secret set LAKEBASE_JDBC_PASSWORD --env dev --repo ravi98sankar/Databricks-pipelines
+gh secret set LAKEBASE_INSTANCE_NAME --env dev --repo ravi98sankar/Databricks-pipelines
 ```
 
 (repeat with `--env prod` for prod's own LakeBase instance). Once these are set, every deploy
-keeps the secret scope in sync automatically - rotate the LakeBase password by updating the
-GitHub secret, and the next deploy pushes the new value, no manual CLI step needed.
+keeps the secret scope in sync automatically.
 
 **b) Run the setup job once** to create the Unity Catalog landing schema/volume and the LakeBase
 target table (both idempotent - safe to re-run):
@@ -223,17 +244,18 @@ automatically on every push to `main` instead of pausing for a manual approval c
 
 Both `deploy_dev` and `deploy_prod` also provision the `lakebase` secret scope from five more
 environment secrets per target - `LAKEBASE_JDBC_HOST`, `LAKEBASE_JDBC_PORT`,
-`LAKEBASE_JDBC_DATABASE`, `LAKEBASE_JDBC_USERNAME`, `LAKEBASE_JDBC_PASSWORD` (see Section 3a).
+`LAKEBASE_JDBC_DATABASE`, `LAKEBASE_JDBC_USERNAME`, `LAKEBASE_INSTANCE_NAME` (see Section 3a).
 These are unrelated to `DATABRICKS_HOST`/`DATABRICKS_TOKEN` - those authenticate the CLI to the
-workspace; these are the application-level Postgres credentials `sync_lakebase.py` and
-`setup_resources.py` read via `dbutils.secrets.get()` at runtime.
+workspace; these are the application-level Postgres connection config `sync_lakebase.py` and
+`setup_resources.py` read via `dbutils.secrets.get()` at runtime. There's no password among them -
+authentication is a fresh 60-minute OAuth token minted per run, not a stored secret.
 
 ## Repo layout
 
 ```
 .
 ├── databricks.yml               # Bundle: variables, all 4 resources, dev/prod targets
-├── requirements.txt              # pyspark, databricks-dlt, psycopg2-binary, Faker, pytest, flake8
+├── requirements.txt              # pyspark, databricks-dlt, psycopg2-binary, Faker, databricks-sdk, ...
 ├── setup.cfg                     # flake8 config (max-line-length=100) + pytest pythonpath
 ├── .github/workflows/ci-cd.yml   # lint_and_test -> validate -> deploy_dev / deploy_prod
 ├── sql/
