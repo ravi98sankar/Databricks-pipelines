@@ -12,9 +12,11 @@ import argparse
 import logging
 import os
 import sys
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 
+from databricks.sdk import WorkspaceClient
 from pyspark.sql import DataFrame, SparkSession
 
 try:
@@ -51,7 +53,13 @@ JDBC_HOST_KEY = "jdbc_host"
 JDBC_PORT_KEY = "jdbc_port"
 JDBC_DATABASE_KEY = "jdbc_database"
 JDBC_USER_KEY = "jdbc_username"
-JDBC_PASSWORD_KEY = "jdbc_password"
+# No jdbc_password key: Lakebase authenticates over OAuth, and a stored
+# password would be a token that silently expires after 60 minutes. See
+# load_lakebase_connection() - the password is minted fresh on every run
+# instead. INSTANCE_NAME_KEY identifies which Lakebase database instance to
+# mint that token for (the instance's name in the workspace, not the JDBC
+# database name).
+INSTANCE_NAME_KEY = "instance_name"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -104,14 +112,36 @@ def get_secret(dbutils, scope: str, key: str) -> str:
     raise RuntimeError(f"Unable to resolve secret '{key}' from scope '{scope}' or env var.")
 
 
+def generate_lakebase_token(instance_name: str) -> str:
+    """Mint a fresh OAuth database credential for the given Lakebase instance.
+
+    Valid for 60 minutes - callers should request a new one per run rather
+    than caching/storing it, since this job's runs are short-lived and a
+    stored token would eventually expire out from under a schedule.
+    WorkspaceClient() uses ambient credentials, so this needs no explicit
+    host/token when running inside a Databricks job.
+    """
+    workspace_client = WorkspaceClient()
+    credential = workspace_client.database.generate_database_credential(
+        request_id=str(uuid.uuid4()),
+        instance_names=[instance_name],
+    )
+    return credential.token
+
+
 def load_lakebase_connection(dbutils) -> LakebaseConnection:
-    """Assemble LakeBase connection details from Databricks Secrets/env vars."""
+    """Assemble LakeBase connection details from Databricks Secrets/env vars.
+
+    host/port/database/username are static config; password is a freshly
+    minted OAuth token (see generate_lakebase_token()), never a stored secret.
+    """
+    instance_name = get_secret(dbutils, SECRET_SCOPE, INSTANCE_NAME_KEY)
     return LakebaseConnection(
         host=get_secret(dbutils, SECRET_SCOPE, JDBC_HOST_KEY),
         port=get_secret(dbutils, SECRET_SCOPE, JDBC_PORT_KEY),
         database=get_secret(dbutils, SECRET_SCOPE, JDBC_DATABASE_KEY),
         username=get_secret(dbutils, SECRET_SCOPE, JDBC_USER_KEY),
-        password=get_secret(dbutils, SECRET_SCOPE, JDBC_PASSWORD_KEY),
+        password=generate_lakebase_token(instance_name),
     )
 
 

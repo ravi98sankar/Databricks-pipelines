@@ -12,5 +12,9 @@ pyspark==3.5.3
 databricks-dlt==0.3.0
 psycopg2-binary==2.9.9
 Faker==40.36.0
+# Preinstalled on Databricks Runtime/serverless already; pinned here only so
+# sync_lakebase.py's `from databricks.sdk import WorkspaceClient` import
+# resolves locally and in CI.
+databricks-sdk==0.125.0
 pytest==8.3.3
 flake8==7.1.1

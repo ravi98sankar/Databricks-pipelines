@@ -90,14 +90,14 @@ jobs:
           LAKEBASE_JDBC_PORT: ${{ secrets.LAKEBASE_JDBC_PORT }}
           LAKEBASE_JDBC_DATABASE: ${{ secrets.LAKEBASE_JDBC_DATABASE }}
           LAKEBASE_JDBC_USERNAME: ${{ secrets.LAKEBASE_JDBC_USERNAME }}
-          LAKEBASE_JDBC_PASSWORD: ${{ secrets.LAKEBASE_JDBC_PASSWORD }}
+          LAKEBASE_INSTANCE_NAME: ${{ secrets.LAKEBASE_INSTANCE_NAME }}
         run: |
           databricks secrets create-scope lakebase || true
           databricks secrets put-secret lakebase jdbc_host --string-value "$LAKEBASE_JDBC_HOST"
           databricks secrets put-secret lakebase jdbc_port --string-value "$LAKEBASE_JDBC_PORT"
           databricks secrets put-secret lakebase jdbc_database --string-value "$LAKEBASE_JDBC_DATABASE"
           databricks secrets put-secret lakebase jdbc_username --string-value "$LAKEBASE_JDBC_USERNAME"
-          databricks secrets put-secret lakebase jdbc_password --string-value "$LAKEBASE_JDBC_PASSWORD"
+          databricks secrets put-secret lakebase instance_name --string-value "$LAKEBASE_INSTANCE_NAME"
 
   deploy_prod:
     name: Deploy to prod
@@ -130,11 +130,11 @@ jobs:
           LAKEBASE_JDBC_PORT: ${{ secrets.LAKEBASE_JDBC_PORT }}
           LAKEBASE_JDBC_DATABASE: ${{ secrets.LAKEBASE_JDBC_DATABASE }}
           LAKEBASE_JDBC_USERNAME: ${{ secrets.LAKEBASE_JDBC_USERNAME }}
-          LAKEBASE_JDBC_PASSWORD: ${{ secrets.LAKEBASE_JDBC_PASSWORD }}
+          LAKEBASE_INSTANCE_NAME: ${{ secrets.LAKEBASE_INSTANCE_NAME }}
         run: |
           databricks secrets create-scope lakebase || true
           databricks secrets put-secret lakebase jdbc_host --string-value "$LAKEBASE_JDBC_HOST"
           databricks secrets put-secret lakebase jdbc_port --string-value "$LAKEBASE_JDBC_PORT"
           databricks secrets put-secret lakebase jdbc_database --string-value "$LAKEBASE_JDBC_DATABASE"
           databricks secrets put-secret lakebase jdbc_username --string-value "$LAKEBASE_JDBC_USERNAME"
-          databricks secrets put-secret lakebase jdbc_password --string-value "$LAKEBASE_JDBC_PASSWORD"
+          databricks secrets put-secret lakebase instance_name --string-value "$LAKEBASE_INSTANCE_NAME"

@@ -9,7 +9,15 @@ import pytest
 from pyspark.sql import Row, SparkSession
 from pyspark.sql import functions as F
 
-from jobs.sync_lakebase import DEFAULT_CATALOG, DEFAULT_SCHEMA, get_secret, parse_args
+import jobs.sync_lakebase as sync_lakebase_module
+from jobs.sync_lakebase import (
+    DEFAULT_CATALOG,
+    DEFAULT_SCHEMA,
+    generate_lakebase_token,
+    get_secret,
+    load_lakebase_connection,
+    parse_args,
+)
 from pipelines.orders_etl import _deduplicate_orders, _standardize_text_columns
 
 
@@ -72,6 +80,54 @@ def test_get_secret_raises_when_unresolved(monkeypatch):
 
     with pytest.raises(RuntimeError):
         get_secret(None, scope="lakebase", key="missing_key")
+
+
+class _FakeCredential:
+    def __init__(self, token):
+        self.token = token
+
+
+class _FakeDatabaseAPI:
+    def __init__(self, token):
+        self._token = token
+        self.calls = []
+
+    def generate_database_credential(self, request_id, instance_names):
+        self.calls.append({"request_id": request_id, "instance_names": instance_names})
+        return _FakeCredential(self._token)
+
+
+class _FakeWorkspaceClient:
+    def __init__(self, token="fake-token"):
+        self.database = _FakeDatabaseAPI(token)
+
+
+def test_generate_lakebase_token_requests_the_given_instance(monkeypatch):
+    fake_client = _FakeWorkspaceClient(token="minted-token")
+    monkeypatch.setattr(sync_lakebase_module, "WorkspaceClient", lambda: fake_client)
+
+    token = generate_lakebase_token("my-instance")
+
+    assert token == "minted-token"
+    assert fake_client.database.calls[0]["instance_names"] == ["my-instance"]
+
+
+def test_load_lakebase_connection_mints_token_instead_of_reading_a_password(monkeypatch):
+    monkeypatch.setenv("JDBC_HOST", "db.example.com")
+    monkeypatch.setenv("JDBC_PORT", "5432")
+    monkeypatch.setenv("JDBC_DATABASE", "app")
+    monkeypatch.setenv("JDBC_USERNAME", "reader")
+    monkeypatch.setenv("INSTANCE_NAME", "my-instance")
+    fake_client = _FakeWorkspaceClient(token="minted-token")
+    monkeypatch.setattr(sync_lakebase_module, "WorkspaceClient", lambda: fake_client)
+
+    conn = load_lakebase_connection(None)
+
+    assert conn.host == "db.example.com"
+    assert conn.port == "5432"
+    assert conn.database == "app"
+    assert conn.username == "reader"
+    assert conn.password == "minted-token"
 
 
 def test_parse_args_defaults_when_run_standalone():
